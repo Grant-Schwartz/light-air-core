@@ -1,5 +1,6 @@
 from enum import Enum
-from typing import Optional
+from analysis import Timing
+from datetime import date
 
 class PropertyType(Enum):
     APARTMENT = "Apartment"
@@ -28,8 +29,9 @@ class Property:
         location: PropertyLocation,
         acres: float,
         gross_buildable_area: int,
+        timing: Timing,
         year_built: str,
-        year_renovated: str|None=None
+        year_renovated: str|None=None,
     ):
         self.name = name,
         self.property_type = property_type,
@@ -38,12 +40,4 @@ class Property:
         self.gross_buildable_area = gross_buildable_area
         self.year_built = year_built
         self.year_renovated = year_renovated
-        
-test = Property(
-    name="Home",
-    property_type=PropertyType.APARTMENT,
-    location=PropertyLocation("250 W 82nd St", "New York", "NY", "10024"),
-    acres=8.6,
-    gross_buildable_area=100000,
-    year_built="2016"
-)
+        self.timing = timing
