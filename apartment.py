@@ -1,7 +1,6 @@
-from property import Property, PropertyType, PropertyLocation
-from analysis import Timing
-from datetime import date
 from enum import Enum
+from analysis import Timing
+import numpy as np
 
 class RollToMarketStrategy(Enum):
     IN_MONTH = "In Month"
@@ -14,23 +13,6 @@ class RollToMarket:
             raise ValueError("Please provide a month for your roll to market strategy")
         self.strategy = strategy
         self.start_month = start_month
-
-class RentGrowthStrategy(Enum):
-    INCREASE_PER_YEAR = "Inc. %/Year",
-    DETAIL = "Detailed"
-
-class RentGrowth:
-    def __init__(self, growth_percentage: float|None=None, growth_percentage_matrix: list[float]|None=None):
-        if growth_percentage is None and growth_percentage_matrix is None:
-            raise ValueError("Please provide rent growth or detailed rent growth matrix")
-        elif growth_percentage is not None and growth_percentage_matrix is None:
-            self.rent_growth_stradegy: RentGrowthStrategy = RentGrowthStrategy.INCREASE_PER_YEAR
-            self.growth_percentage = growth_percentage
-        elif growth_percentage is not None and growth_percentage_matrix is None:
-            self.rent_growth_stradegy: RentGrowthStrategy = RentGrowthStrategy.DETAIL
-            self.growth_percentage_matrix: list[float] = growth_percentage_matrix
-        else:
-            raise ValueError("Please only provide a rent growth rate or detailed rent growth")
 
 class ApartmentTenant:
     def __init__(
@@ -45,7 +27,7 @@ class ApartmentTenant:
         in_place_rent: int,
         roll_to_market: RollToMarket,
         market_rent: float,
-        rent_growth: RentGrowth,
+        rent_growth_matrix: dict,
         utility_reimbursement: float,
         make_ready_new_cost: float,
         make_ready_renew_cost: float,
@@ -55,74 +37,156 @@ class ApartmentTenant:
         renew_probability: float,
         downtime: int
     ):
+        # UNIT INFO
         self.unit_name = unit_name
         self.beds = beds
         self.bath = bath
         self.unit_size = unit_size
         self.total_units = total_units
-        self.units_lease_initial = units_lease_initial,
+
+        # UNIT LEASE INFO
+        self.units_lease_initial = units_lease_initial
         self.vacant_units_initial = total_units - units_lease_initial
-        self.initial_occupancy = units_lease_initial / total_units
         self.lease_up_pace = lease_up_pace
+
+        # UNIT RENT INFO
         self.in_place_rent = in_place_rent
+        self.market_rent = market_rent
         self.roll_to_market = roll_to_market
-        self.rent_growth = rent_growth
+        self.rent_growth_matrix = rent_growth_matrix
+
+        # UNIT TI & COSTS INFO
         self.utility_reimbursement = utility_reimbursement
         self.make_ready_new_cost = make_ready_new_cost
         self.make_ready_renew_cost = make_ready_renew_cost
+        
+        # UNIT GENERATION INFO
         self.free_rent_new = free_rent_new
         self.free_rent_renew = free_rent_renew
         self.free_rent_second_generation = free_rent_second_generation
         self.renew_probability = renew_probability
         self.downtime = downtime
 
-class Apartment(Property):
-    def __init__(
-        self,
-        name: str,
-        property_type: PropertyType,
-        location: PropertyLocation,
-        acres: float,
-        gross_buildable_area: int,
-        timing: Timing,
-        year_built: str,
-        year_renovated: str|None=None,
-        tenants: list[ApartmentTenant]=[]
-    ):
-        super().__init__(name, property_type, location, acres, gross_buildable_area, timing, year_built, year_renovated)
-        self.tenants: list[ApartmentTenant] = tenants
+        # RENT ROLL VARS
+        self.market_rents = []
+        self.units_leased = []
+        self.total_rent = []
+        self.loss_to_lease = []
+        self.make_ready_untrended = []
+        self.first_generation_free_rent = []
+        self.second_generation_free_rent = []
+        self.downtime_cost = []
 
-    def add_tenant(self, tenant: ApartmentTenant):
-        self.tenants.append(tenant)
 
-app = Apartment(
-    name="Home",
-    property_type=PropertyType.APARTMENT,
-    location=PropertyLocation("250 W 82nd St", "New York", "NY", "10024"),
-    acres=8.6,
-    gross_buildable_area=100000,
-    year_built="2016",
-    timing=Timing(10, date(2024,1,1), 13)
-)
+    def get_growth_rate(self, timing: Timing, month: int):
+        if month >= timing.growth_begin_month and (month - timing.growth_begin_month) % 12 == 0:
+            return self.rent_growth_matrix[month] * (((month - timing.growth_begin_month) // 12) + 1)
+        else:
+            return 0.0
+        
+    def get_base_rent(self, timing: Timing, month: int):
+        if self.roll_to_market.strategy == RollToMarketStrategy.YES and month >= timing.growth_begin_month:
+            return self.market_rent
+        elif self.roll_to_market.strategy == RollToMarketStrategy.IN_MONTH and month >= self.roll_to_market.start_month:
+            return self.market_rent
+        else:
+            return self.in_place_rent
 
-tenant1 = ApartmentTenant(
-    unit_name="A1",
-    beds=1,
-    bath=1,
-    unit_size=650,
-    total_units=90,
-    units_lease_initial=90,
-    lease_up_pace=15,
-    in_place_rent=1050,
-    roll_to_market=RollToMarket(RollToMarketStrategy.IN_MONTH, 25),
-    market_rent=1050,
-    rent_growth=RentGrowth(.03),
-    utility_reimbursement=60,
-    make_ready_new_cost=550,
-    make_ready_renew_cost=150,
-    free_rent_new=1,
-    free_rent_renew=0.5,
-    free_rent_second_generation=False,
-    renew_probability=0.6,
-    downtime=10
-)
+    def gen_market_rents(self, timing: Timing):        
+        rents = []
+        last_rate = 0.0
+        for month in range(1, timing.analysis_length_months+1):
+            base_rent = self.get_base_rent(timing, month)
+            growth_rate = self.get_growth_rate(timing, month)
+            if last_rate < growth_rate:
+                last_rate = growth_rate
+            true_rent = base_rent * (1 + last_rate)
+            
+            rents.append(true_rent)
+        
+        return rents
+    
+    def gen_units_leased(self, timing: Timing):
+        units_leased = [self.units_lease_initial]
+        for _ in range(2, timing.analysis_length_months+1):
+            if units_leased[-1] + self.lease_up_pace < self.total_units:
+                units_leased.append(units_leased[-1] + self.lease_up_pace)
+            else:
+                units_leased.append(self.total_units)
+        
+        return units_leased
+
+    def gen_loss_to_lease(self, rents: list[float], units_leased: list[int], timing: Timing):
+        loss_to_lease = []
+        for month in range(len(units_leased)):
+            loss = (self.total_units - units_leased[month]) * rents[month]
+            loss_to_lease.append(loss)
+        
+        return loss_to_lease
+
+    def gen_untrended_make_ready(self, units_leased: list[int], timing: Timing):
+        make_ready_blended = (self.make_ready_renew_cost * self.renew_probability) + ((1 - self.renew_probability) * self.make_ready_new_cost)
+        make_ready_cost = []
+        for month in range(timing.analysis_length_months):
+            if units_leased[month] < self.total_units:
+                make_ready_cost.append(0)
+            else:
+                make_ready_cost.append((self.total_units / 12)*make_ready_blended)
+        
+        return make_ready_cost
+    
+    def gen_first_generation_free_rent(self, units_leased: list[int], rents: list[float], timing: Timing) -> list[float]:
+        free_rent = []
+        last_month_units_leased = 0
+        for month in range(timing.analysis_length_months):
+            if units_leased[month] < self.total_units:
+                amount = (units_leased[month] - last_month_units_leased) * self.free_rent_new * rents[month]
+                last_month_units_leased = units_leased[month]
+                free_rent.append(amount)
+            else:
+                free_rent.append(0.0)
+
+        return free_rent
+    
+    def gen_second_generation_free_rent(self, units_leased: list[int], rents: list[float], timing: Timing) -> list[float]:
+        free_rent = []
+        for month in range(timing.analysis_length_months):
+            if month >= timing.growth_begin_month:
+                renewed_units = ((self.total_units - (self.total_units - units_leased[month])) / 12) * self.renew_probability
+                new_units = ((self.total_units - (self.total_units - units_leased[month])) / 12) * (1 - self.renew_probability)
+
+                amount = renewed_units * self.free_rent_renew * rents[month] + new_units * self.free_rent_new * rents[month]
+
+                free_rent.append(amount) 
+            else:
+                free_rent.append(0.0)
+        
+        return free_rent
+
+    def gen_downtime(self, units_leased: list[int], rents: list[float], timing: Timing):
+        downtime_matrix = []
+        blended_downtime = (self.downtime * (1 - self.renew_probability)) / 365
+        for month in range(timing.analysis_length_months):
+            if month >= timing.growth_begin_month:
+                amount = blended_downtime * units_leased[month] * rents[month]
+                downtime_matrix.append(amount)
+            else:
+                downtime_matrix.append(0.0)
+
+        return downtime_matrix
+
+    def rent_roll(self, timing: Timing):
+        self.market_rents = self.gen_market_rents(timing)
+        self.units_leased = self.gen_units_leased(timing)
+
+        self.total_rent = [self.market_rents[month] * self.units_leased[month] for month in range(len(self.market_rents))]
+        self.loss_to_lease = self.gen_loss_to_lease(self.market_rents, self.units_leased, timing)
+
+        self.make_ready_untrended = self.gen_untrended_make_ready(self.units_leased, timing)
+        
+        self.first_generation_free_rent = self.gen_first_generation_free_rent(self.units_leased, self.market_rents, timing)
+        self.second_generation_free_rent = self.gen_second_generation_free_rent(self.units_leased, self.market_rents, timing)
+        
+        self.downtime_cost = self.gen_downtime(self.units_leased, self.market_rents, timing)
+
+        return True
