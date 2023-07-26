@@ -189,4 +189,33 @@ class ApartmentTenant:
         
         self.downtime_cost = self.gen_downtime(self.units_leased, self.market_rents, timing)
 
-        return True
+        return {
+            "market_rents": np.array(self.market_rents),
+            "units_leased": np.array(self.units_leased),
+            "total_rent": np.array(self.total_rent),
+            "loss_to_lease": np.array(self.loss_to_lease),
+            "make_ready": np.array(self.make_ready_untrended),
+            "first_generation_free_rent": np.array(self.first_generation_free_rent),
+            "second_generation_free_rent":  np.array(self.second_generation_free_rent),
+            "downtime_cost": np.array(self.downtime_cost)
+        }
+
+class ApartmentIncome:
+
+    def __init__(self, name: str, cagr: float, percent_fixed: float, base_amount: float):
+        self.name: str = name
+        self.per_unit: float = 0.0
+        self.cagr: float = cagr
+        self.percent_fixed: float = percent_fixed
+        self.base_amount: float = base_amount
+        self.calculated = []
+
+    def roll(self, physical_occupancy: list[float], timing: Timing):
+        calculated_income = []
+        for month in range(timing.analysis_length_months):
+            year = month // timing.growth_begin_month
+            month_income = (self.percent_fixed * self.base_amount / 12)+((1 - self.percent_fixed)*self.base_amount*physical_occupancy[month]/12)*(1+self.cagr)**year
+            calculated_income.append(month_income)
+        
+        self.calculated = np.array(calculated_income)
+        return self.calculated

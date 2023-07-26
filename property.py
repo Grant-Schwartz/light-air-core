@@ -1,7 +1,8 @@
 from enum import Enum
 from analysis import Timing
 from datetime import date
-from apartment import ApartmentTenant, RollToMarket, RollToMarketStrategy
+from apartment import ApartmentTenant, RollToMarket, RollToMarketStrategy, ApartmentIncome
+import numpy as np
 
 class PropertyType(Enum):
     APARTMENT = "Apartment"
@@ -30,6 +31,7 @@ class Property:
         location: PropertyLocation,
         acres: float,
         gross_buildable_area: int,
+        vacancy_rate: float,
         timing: Timing,
         year_built: str,
         year_renovated: str|None=None,
@@ -44,13 +46,76 @@ class Property:
         self.year_renovated = year_renovated
         self.timing = timing
         self.tenants = tenants
+        self.vacancy_rate = vacancy_rate
+
+        self.physical_occcupancy = []
+
+        self.rental_revenue = {}
+        self.rental_revenues = []
+
+        self.incomes = []
+        self.total_other_income = []
+        self.total_potential_gross_income = []
+        self.general_vacancy = []
     
     def add_tenant(self,tenant):
         self.tenants.append(tenant)
         
     def rent_roll(self):
         for tenant in self.tenants:
-            tenant.rent_roll(timing=self.timing)
+            tenant_data = tenant.rent_roll(timing=self.timing)
+            self.rental_revenues.append(tenant_data)
+            
+        self.calc_rental_revenue()
+        return
+
+    def calc_physical_occupancy(self):
+        total_leased_units = np.zeros(self.timing.analysis_length_months)
+        total_units = 0
+        for tenant in self.tenants:
+            total_leased_units = np.add(total_leased_units, tenant.units_leased)
+            total_units += tenant.total_units
+        
+        self.physical_occcupancy = total_leased_units / total_units
+        return
+
+    def calc_rental_revenue(self):
+        empty_field = np.zeros(self.timing.analysis_length_months)
+        total_rental_revenue = {
+            "gross_revenue": empty_field,
+            "concessions": empty_field,
+            "downtime_loss_to_lease": empty_field
+        }
+        for unit in self.rental_revenues:
+            unit["gross_revenue"] = unit["market_rents"] * unit["units_leased"]
+            unit["concessions"] = np.add(unit["first_generation_free_rent"], unit["second_generation_free_rent"])
+            unit["downtime_loss_to_lease"] = np.add(unit["downtime_cost"], unit["loss_to_lease"])
+
+            total_rental_revenue["gross_revenue"] += unit["gross_revenue"]
+            total_rental_revenue["concessions"] += unit["concessions"]
+            total_rental_revenue["downtime_loss_to_lease"] += unit["downtime_loss_to_lease"]
+
+        total_rental_revenue["total_rental_revenue"] = total_rental_revenue["gross_revenue"] - total_rental_revenue["concessions"] - total_rental_revenue["downtime_loss_to_lease"]
+        self.rental_revenue = total_rental_revenue
+
+        return
+
+    def add_income(self, income_stream):
+        self.incomes.append(income_stream)
+
+    def income_roll(self):
+        self.calc_physical_occupancy()
+        total_other_income = np.zeros(self.timing.analysis_length_months)
+        for income in self.incomes:
+            roll_data = income.roll(physical_occupancy=self.physical_occcupancy, timing=self.timing)
+            total_other_income += roll_data
+
+        self.total_other_income = total_other_income
+        self.total_potential_gross_income = self.rental_revenue["gross_revenue"] + total_other_income
+        self.general_vacancy = self.total_potential_gross_income * self.vacancy_rate
+        self.effective_gross_income = self.total_potential_gross_income - self.general_vacancy
+        return
+
 
 prop = Property(
     name="Home",
@@ -58,6 +123,7 @@ prop = Property(
     location=PropertyLocation("250 W 82nd St", "New York", "NY", "10024"),
     acres=8.6,
     gross_buildable_area=100000,
+    vacancy_rate=0.05,
     year_built="2016",
     timing=Timing(10, date(2024,1,1), 13)
 )
@@ -84,5 +150,35 @@ tenant1 = ApartmentTenant(
     downtime=10
 )
 
+rubs = ApartmentIncome(
+    name="Utility Reimbursement",
+    cagr=.02,
+    percent_fixed=0,
+    base_amount=93600,
+)
+parking = ApartmentIncome(
+    name="Parking",
+    cagr=.02,
+    percent_fixed=0,
+    base_amount= 120375
+)
+storage = ApartmentIncome(
+    name="Storage",
+    cagr=.02,
+    percent_fixed=0,
+    base_amount=10098,
+)
+other = ApartmentIncome(
+    name="Other",
+    cagr=.02,
+    percent_fixed=0,
+    base_amount=128454,
+)
+
 prop.add_tenant(tenant1)
 prop.rent_roll()
+prop.add_income(rubs)
+prop.add_income(parking)
+prop.add_income(storage)
+prop.add_income(other)
+prop.income_roll()
