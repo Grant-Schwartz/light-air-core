@@ -13,6 +13,9 @@ class RollToMarket:
             raise ValueError("Please provide a month for your roll to market strategy")
         self.strategy = strategy
         self.start_month = start_month
+    
+    def json(self):
+        return self.__dict__
 
 class ApartmentTenant:
     def __init__(
@@ -200,6 +203,9 @@ class ApartmentTenant:
             "downtime_cost": np.array(self.downtime_cost)
         }
 
+    def json(self):
+        return self.__dict__
+
 class ApartmentIncome:
 
     def __init__(self, name: str, cagr: float, percent_fixed: float, base_amount: float):
@@ -219,3 +225,35 @@ class ApartmentIncome:
         
         self.calculated = np.array(calculated_income)
         return self.calculated
+
+    def json(self):
+        return self.__dict__
+
+class ExpenseType(Enum):
+    CAPEX: str = "CapEx"
+    OPEX: str = "OpEx"
+
+
+class ApartmentExpense:
+
+    def __init__(self, name: str, type: ExpenseType, cagr: float, percent_fixed: float, base_amount: float):
+        self.name: str = name
+        self.type: ExpenseType = type
+        self.per_unit: float = 0.0
+        self.cagr: float = cagr
+        self.percent_fixed: float = percent_fixed
+        self.base_amount: float = base_amount
+        self.calculated = []
+
+    def roll(self, physical_occupancy: list[float], timing: Timing):
+        calculated_expense = []
+        for month in range(timing.analysis_length_months):
+            year = month // timing.growth_begin_month
+            month_income = (self.percent_fixed * self.base_amount / 12)+((1 - self.percent_fixed)*self.base_amount*physical_occupancy[month]/12)*(1+self.cagr)**year
+            calculated_expense.append(month_income)
+        
+        self.calculated = np.array(calculated_expense)
+        return self.calculated
+    
+    def json(self):
+        return self.__dict__

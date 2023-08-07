@@ -27,3 +27,6 @@ class Timing:
 
         self.growth_begin_month = growth_begin_month
         self.growth_begin_date = self.calc_growth_begin_date(growth_begin_month, analysis_start_date)
+    
+    def json(self):
+        return self.__dict__

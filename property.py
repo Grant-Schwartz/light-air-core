@@ -1,8 +1,9 @@
 from enum import Enum
 from analysis import Timing
-from datetime import date
-from apartment import ApartmentTenant, RollToMarket, RollToMarketStrategy, ApartmentIncome
+from datetime import date, datetime
+from apartment import ApartmentTenant, RollToMarket, RollToMarketStrategy, ApartmentIncome, ApartmentExpense, ExpenseType
 import numpy as np
+import json
 
 class PropertyType(Enum):
     APARTMENT = "Apartment"
@@ -16,10 +17,13 @@ class PropertyLocation:
         state: str,
         zipcode: str
     ):
-        self.address = address,
-        self.city = city,
-        self.state = state
-        self.zipcode = zipcode
+        self.address: str = address,
+        self.city: str = city,
+        self.state: str = state
+        self.zipcode: str = zipcode
+    
+    def json(self):
+        return self.__dict__
 
 
 class Property:
@@ -48,7 +52,7 @@ class Property:
         self.tenants = tenants
         self.vacancy_rate = vacancy_rate
 
-        self.physical_occcupancy = []
+        self.physical_occupancy = []
 
         self.rental_revenue = {}
         self.rental_revenues = []
@@ -57,6 +61,14 @@ class Property:
         self.total_other_income = []
         self.total_potential_gross_income = []
         self.general_vacancy = []
+        self.effective_gross_income = []
+
+        self.opex = []
+        self.capex = []
+        self.total_expenses = []
+
+        self.noi = []
+        self.cf_from_operations = []
     
     def add_tenant(self,tenant):
         self.tenants.append(tenant)
@@ -76,7 +88,7 @@ class Property:
             total_leased_units = np.add(total_leased_units, tenant.units_leased)
             total_units += tenant.total_units
         
-        self.physical_occcupancy = total_leased_units / total_units
+        self.physical_occupancy = total_leased_units / total_units
         return
 
     def calc_rental_revenue(self):
@@ -107,7 +119,7 @@ class Property:
         self.calc_physical_occupancy()
         total_other_income = np.zeros(self.timing.analysis_length_months)
         for income in self.incomes:
-            roll_data = income.roll(physical_occupancy=self.physical_occcupancy, timing=self.timing)
+            roll_data = income.roll(physical_occupancy=self.physical_occupancy, timing=self.timing)
             total_other_income += roll_data
 
         self.total_other_income = total_other_income
@@ -115,6 +127,49 @@ class Property:
         self.general_vacancy = self.total_potential_gross_income * self.vacancy_rate
         self.effective_gross_income = self.total_potential_gross_income - self.general_vacancy
         return
+    
+    def add_expense(self, expense_stream):
+        if expense_stream.type == ExpenseType.CAPEX:
+            self.capex.append(expense_stream)
+        elif expense_stream.type == ExpenseType.OPEX:
+            self.opex.append(expense_stream)
+    
+    def expense_roll(self):
+        self.calc_physical_occupancy()
+        total_opex = np.zeros(self.timing.analysis_length_months)
+        total_capex = np.zeros(self.timing.analysis_length_months)
+
+        for expense in self.opex:
+            roll_data = expense.roll(physical_occupancy=self.physical_occupancy, timing=self.timing)
+            total_opex += roll_data
+        
+        for expense in self.capex:
+            roll_data = expense.roll(physical_occupancy=self.physical_occupancy, timing=self.timing)
+            total_capex += roll_data
+        
+        self.opex = total_opex
+        self.capex = total_capex
+
+        self.noi = self.effective_gross_income - self.opex
+        self.total_expenses = self.opex + self.capex
+        self.cf_from_operations = self.noi - self.capex
+
+        return
+    
+    def json(self):
+        return self.__dict__
+
+def JSONHandler(Obj):
+    if hasattr(Obj, 'json'):
+        return Obj.json()
+    elif isinstance(Obj, Enum):
+        return Obj.name
+    elif isinstance(Obj, (datetime, date)):
+        return Obj.isoformat()
+    elif isinstance(Obj, np.ndarray):
+        return Obj.tolist()
+    else:
+        raise TypeError("Object of type %s with value of %s is not JSON serializable" % (type(Obj), repr(Obj)))
 
 
 prop = Property(
@@ -174,6 +229,14 @@ other = ApartmentIncome(
     percent_fixed=0,
     base_amount=128454,
 )
+payroll = ApartmentExpense(
+    name="Payroll",
+    type=ExpenseType.OPEX,
+    cagr=.02,
+    percent_fixed=.75,
+    base_amount=70000
+)
+
 
 prop.add_tenant(tenant1)
 prop.rent_roll()
@@ -182,3 +245,7 @@ prop.add_income(parking)
 prop.add_income(storage)
 prop.add_income(other)
 prop.income_roll()
+prop.add_expense(payroll)
+prop.expense_roll()
+
+print(json.dumps(prop, default=JSONHandler))
