@@ -4,8 +4,9 @@ from datetime import date, datetime
 from apartment import ApartmentTenant, RollToMarket, RollToMarketStrategy, ApartmentIncome, ApartmentExpense, ExpenseType
 import numpy as np
 import json
+from utils import JSONHandler
 
-class PropertyType(Enum):
+class PropertyType(str, Enum):
     APARTMENT = "Apartment"
 
 class PropertyLocation:
@@ -49,6 +50,7 @@ class Property:
         self.year_built = year_built
         self.year_renovated = year_renovated
         self.timing = timing
+
         self.tenants = tenants
         self.vacancy_rate = vacancy_rate
 
@@ -158,18 +160,6 @@ class Property:
     
     def json(self):
         return self.__dict__
-
-def JSONHandler(Obj):
-    if hasattr(Obj, 'json'):
-        return Obj.json()
-    elif isinstance(Obj, Enum):
-        return Obj.name
-    elif isinstance(Obj, (datetime, date)):
-        return Obj.isoformat()
-    elif isinstance(Obj, np.ndarray):
-        return Obj.tolist()
-    else:
-        raise TypeError("Object of type %s with value of %s is not JSON serializable" % (type(Obj), repr(Obj)))
 
 
 prop = Property(
